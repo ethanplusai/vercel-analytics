@@ -60,10 +60,7 @@ export function getProject(id, { range, signal } = {}) {
   return request(`/api/projects/${encodeURIComponent(id)}${qs}`, { signal });
 }
 
-export function getDimension(name, { range, projectId, signal } = {}) {
-  const params = new URLSearchParams();
-  if (range) params.set('range', range);
-  if (projectId) params.set('projectId', projectId);
-  const qs = params.toString();
-  return request(`/api/dimension/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`, { signal });
+export function getDimension(name, { range, signal } = {}) {
+  const qs = range ? `?range=${encodeURIComponent(range)}` : '';
+  return request(`/api/dimension/${encodeURIComponent(name)}${qs}`, { signal });
 }
