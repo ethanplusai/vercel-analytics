@@ -2,7 +2,7 @@
   "name": "vercel-analytics",
   "version": "1.0.0",
   "type": "module",
-  "description": "One dashboard for Web Analytics across every Vercel project you own",
+  "description": "One dashboard for Vercel Web Analytics across every project on every team a token can see",
   "license": "MIT",
   "main": "server.js",
   "scripts": {

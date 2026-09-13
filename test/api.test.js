@@ -157,7 +157,7 @@ test('projects from different scopes keep their own team attribution, and it rea
   const calls = [];
   const client = stubClient({
     projectsByScope: {
-      personal: [{ id: 'prj_personal', name: 'solo-site', enabledAt: 1 }],
+      personal: [{ id: 'prj_solo', name: 'solo-site', enabledAt: 1 }],
       team_example: [{ id: 'prj_team', name: 'acme-site', enabledAt: 1 }],
     },
   });
@@ -176,8 +176,8 @@ test('projects from different scopes keep their own team attribution, and it rea
     // `in`, not a bare undefined check: a missing key also reads as undefined,
     // so the plain assertion would pass even if the personal project were
     // never queried at all.
-    assert.ok('prj_personal' in teamIdByProject, 'the personal project must actually be queried');
-    assert.equal(teamIdByProject.prj_personal, undefined, 'the personal scope must query with no teamId');
+    assert.ok('prj_solo' in teamIdByProject, 'the personal project must actually be queried');
+    assert.equal(teamIdByProject.prj_solo, undefined, 'the personal scope must query with no teamId');
     assert.equal(teamIdByProject.prj_team, 'team_example', 'the team scope must query with its own teamId');
   });
 });
