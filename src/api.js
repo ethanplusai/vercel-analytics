@@ -33,7 +33,7 @@ export function resolveRange(rangeParam, now) {
   return { days, sinceDay, untilDay };
 }
 
-export function createApi({ config, client, cache, auth = null, now = () => new Date() }) {
+export function createApi({ config, client, cache, now = () => new Date() }) {
   const router = createRouter();
   const serveStatic = createStaticHandler({ root: PUBLIC_DIR });
 
@@ -150,19 +150,16 @@ export function createApi({ config, client, cache, auth = null, now = () => new 
   // createRouter/createStaticHandler each resolve to Promise<boolean> (route
   // matched or not) rather than owning the whole response cycle, so this is
   // the single place that composes the full request lifecycle: the host
-  // guard, then the auth gate (skipped entirely when `auth` is null or
-  // disabled — that's the documented local behaviour, no VA_PASSWORD means
-  // no login), then the API router, then static files, then a 404. A
-  // handler that throws is already caught inside `router.handle` and turned
-  // into a 500, so nothing here needs its own try/catch.
+  // guard, then the API router, then static files, then a 404. Session auth
+  // (the /login and /logout routes, and gating everything else while
+  // unauthenticated) is a layer server.js wraps around the handler returned
+  // here — this function has no notion of it, so it stays testable, as
+  // test/api.test.js does, without ever standing up a passphrase. A handler
+  // that throws is already caught inside `router.handle` and turned into a
+  // 500, so nothing here needs its own try/catch.
   return async function handleRequest(req, res) {
     if (!isRequestLocal(req, { extraHosts: config.allowedHosts ?? [] })) {
       sendError(res, 403, 'forbidden_host', 'This server only accepts requests from the local machine.');
-      return;
-    }
-
-    if (auth && auth.enabled && !auth.isAuthenticated(req, { secure: config.secureCookies })) {
-      sendError(res, 401, 'unauthorized', 'Sign in to use this API.');
       return;
     }
 

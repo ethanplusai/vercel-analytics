@@ -5,8 +5,60 @@ import { createCache } from './src/cache.js';
 import { createAuth } from './src/auth.js';
 import { createApi } from './src/api.js';
 import { sendError } from './src/http.js';
+import { renderLoginPage } from './src/login-page.js';
 
 const MIN_PASSPHRASE = 20;
+
+// Fixed delay after a failed login, in milliseconds. Serverless instances
+// share no memory, so there is no rate limiter to lean on here — this
+// constant-time penalty is the only thing that costs an online attacker
+// anything per guess. Injectable via `sleep` so tests don't have to pay it.
+const FAILED_LOGIN_DELAY_MS = 400;
+
+function defaultSleep(ms) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+// Read an `application/x-www-form-urlencoded` body, bounded the same way
+// `readJsonBody` in src/http.js bounds a JSON body: accumulate, reject past
+// a size limit, destroy the socket rather than keep buffering. Kept local to
+// server.js (rather than added to http.js) because it's login-form-specific.
+function readFormBody(req, { limit = 1_000_000 } = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const chunks = [];
+    let length = 0;
+    let settled = false;
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+
+    req.on('data', (chunk) => {
+      if (settled) return;
+      length += chunk.length;
+      if (length > limit) {
+        const err = new Error('Request body too large');
+        err.code = 'TOO_LARGE';
+        setImmediate(() => req.destroy());
+        fail(err);
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('error', (err) => {
+      fail(err);
+    });
+
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolvePromise(new URLSearchParams(Buffer.concat(chunks).toString('utf8')));
+    });
+  });
+}
 
 export function assertSafeToStart(config, auth) {
   if (!config.token) {
@@ -27,13 +79,95 @@ export function assertSafeToStart(config, auth) {
   }
 }
 
-function build(env = process.env) {
+// Wraps the plain (req, res) handler returned by createApi with the session
+// gate. Only exists at all when `auth.enabled` — with no VA_PASSWORD (local
+// use) this is never called and there is no redirect, no cookie, and no
+// /login route. Exported so tests can compose it directly the same way
+// test/api.test.js composes createApi, without going through build()'s
+// VERCEL_TOKEN requirement.
+export function createGate({
+  auth, config, api, sleep = defaultSleep,
+}) {
+  return async function gate(req, res) {
+    if (!auth.enabled) {
+      await api(req, res);
+      return;
+    }
+
+    const secure = Boolean(config.secureCookies);
+
+    // Parsed once and reused everywhere below, so there is exactly one
+    // notion of "what path is this request for" in this handler — the raw
+    // req.url must never be re-tested separately (e.g. with
+    // startsWith('/api/')), or the two checks can drift apart.
+    const url = new URL(req.url, 'http://localhost');
+
+    if (url.pathname === '/login') {
+      if (req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(renderLoginPage({}));
+        return;
+      }
+      if (req.method === 'POST') {
+        let params;
+        try {
+          params = await readFormBody(req);
+        } catch (err) {
+          const code = err.code === 'TOO_LARGE' ? 'too_large' : 'bad_request';
+          sendError(res, err.code === 'TOO_LARGE' ? 413 : 400, code, err.message);
+          return;
+        }
+        const candidate = params.get('password') ?? '';
+        if (auth.checkPassphrase(candidate)) {
+          res.writeHead(303, { location: '/', 'set-cookie': auth.issueCookie({ secure }) });
+          res.end();
+        } else {
+          await sleep(FAILED_LOGIN_DELAY_MS);
+          res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
+          res.end(renderLoginPage({ error: 'Incorrect passphrase.' }));
+        }
+        return;
+      }
+      sendError(res, 404, 'not_found', 'Not found.');
+      return;
+    }
+
+    if (url.pathname === '/logout' && req.method === 'POST') {
+      res.writeHead(303, { location: '/login', 'set-cookie': auth.clearCookie({ secure }) });
+      res.end();
+      return;
+    }
+
+    // This project has no cron and no poll endpoint, so — unlike the
+    // sibling this gate was ported from — every remaining route goes
+    // through the session check below. There is no exemption to carve out.
+    if (!auth.isAuthenticated(req, { secure })) {
+      if (url.pathname.startsWith('/api/')) {
+        sendError(res, 401, 'unauthorized', 'Sign in to use this API.');
+      } else {
+        res.writeHead(303, { location: '/login' });
+        res.end();
+      }
+      return;
+    }
+
+    await api(req, res);
+  };
+}
+
+function build(env = process.env, { client: clientOverride, sleep } = {}) {
   const config = loadConfig(env);
   const auth = createAuth({ passphrase: config.password });
   assertSafeToStart(config, auth);
-  const client = createVercelClient({ token: config.token, baseUrl: config.apiBaseUrl });
+  const client = clientOverride ?? createVercelClient({ token: config.token, baseUrl: config.apiBaseUrl });
   const cache = createCache({ ttlMs: config.cacheTtlMs });
-  return { config, handler: createApi({ config, client, cache, auth }) };
+  const api = createApi({ config, client, cache });
+  const handler = createGate({
+    auth, config, api, sleep,
+  });
+  return {
+    config, auth, handler,
+  };
 }
 
 export async function main() {
@@ -50,7 +184,7 @@ export async function main() {
 let ready = null;
 export default async function handler(req, res) {
   if (!ready) {
-    ready = Promise.resolve().then(build).catch((err) => {
+    ready = Promise.resolve().then(() => build()).catch((err) => {
       ready = null;
       throw err;
     });
