@@ -65,6 +65,12 @@ export function assertSafeToStart(config, auth) {
     throw new Error('VERCEL_TOKEN is required. Create a token at https://vercel.com/account/tokens');
   }
   if (!config.exposedBeyondLoopback) return;
+  if (!auth.enabled && !config.allowPublic) {
+    throw new Error(
+      'This deployment is reachable beyond loopback with no VA_PASSWORD. '
+      + 'Set VA_PASSWORD, or set VA_ALLOW_PUBLIC=1 to deliberately publish your analytics.',
+    );
+  }
   // VA_ALLOWED_HOSTS is documented as optional ("behind a proxy"), but the
   // host guard below (isRequestLocal, shared with src/api.js) is
   // unconditional: it accepts only loopback names plus whatever this list
@@ -77,12 +83,6 @@ export function assertSafeToStart(config, auth) {
     throw new Error(
       'VA_ALLOWED_HOSTS must list the hostname(s) this deployment is served on '
       + '(e.g. "analytics.example.com"), or every request will be refused as a forbidden host.',
-    );
-  }
-  if (!auth.enabled && !config.allowPublic) {
-    throw new Error(
-      'This deployment is reachable beyond loopback with no VA_PASSWORD. '
-      + 'Set VA_PASSWORD, or set VA_ALLOW_PUBLIC=1 to deliberately publish your analytics.',
     );
   }
   // Measured on the effective (trimmed) passphrase, not the raw env value —

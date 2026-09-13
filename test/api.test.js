@@ -116,6 +116,10 @@ test('projects from different scopes keep their own team attribution, and it rea
 
     await fetch(`${base}/api/overview?range=7`);
     const teamIdByProject = Object.fromEntries(calls.map((c) => [c.projectId, c.teamId]));
+    // `in`, not a bare undefined check: a missing key also reads as undefined,
+    // so the plain assertion would pass even if the personal project were
+    // never queried at all.
+    assert.ok('prj_personal' in teamIdByProject, 'the personal project must actually be queried');
     assert.equal(teamIdByProject.prj_personal, undefined, 'the personal scope must query with no teamId');
     assert.equal(teamIdByProject.prj_team, 'team_example', 'the team scope must query with its own teamId');
   });
