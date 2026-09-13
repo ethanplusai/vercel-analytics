@@ -116,20 +116,6 @@ export function seriesColorVar(slot) {
   return `var(--series-${slot})`;
 }
 
-// Only ever turn untrusted data (referrers, paths) into a link when it
-// resolves to an http(s) URL — closes the `javascript:`/`data:` href sink
-// before it can ever open, even though today's callers already prefix with
-// https://.
-export function safeHref(value) {
-  if (!value) return null;
-  try {
-    const url = new URL(value, 'https://github.com');
-    return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : null;
-  } catch {
-    return null;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // DOM helpers (used only inside the render* functions below)
 // ---------------------------------------------------------------------------
@@ -152,10 +138,9 @@ function el(tag, { className, text } = {}) {
   return node;
 }
 
-// A header shared by renderTimeSeries and renderBarList: title, optional
-// subtitle, an optional legend (only ever two coloured line-keys — never
-// coloured text), and the Table toggle that is every chart's no-hover path
-// to its data.
+// The header used by renderTimeSeries: title, optional subtitle, an
+// optional legend (only ever two coloured line-keys — never coloured text),
+// and the Table toggle that is every chart's no-hover path to its data.
 function buildChartHead({ title, subtitle, seriesForLegend, onToggleTable }) {
   const figcaption = el('figcaption', { className: 'chart__head' });
   figcaption.append(el('h3', { className: 'chart__title', text: title }));
@@ -192,10 +177,10 @@ function buildTooltip() {
 
 // Places an already-visible `tip` at (x, y) relative to `anchor` (the tip's
 // `position: relative` ancestor), then clamps it against the viewport so it
-// can never be cut off at a right or bottom edge — used by both
-// renderTimeSeries' crosshair tooltip and renderBarList's per-row tooltip.
-// Must be called after `tip.style.display = 'block'` (and its content is in
-// place) so `getBoundingClientRect()` measures its real, painted size.
+// can never be cut off at a right or bottom edge — used by
+// renderTimeSeries' crosshair tooltip. Must be called after
+// `tip.style.display = 'block'` (and its content is in place) so
+// `getBoundingClientRect()` measures its real, painted size.
 function positionTip(tip, anchor, x, y) {
   tip.style.right = '';
   tip.style.bottom = '';
@@ -621,182 +606,4 @@ export function renderSparkline(container, spec) {
 
   container.append(svg);
   return { destroy() {} };
-}
-
-// ---------------------------------------------------------------------------
-// renderBarList — nominal categories (referrers, paths). All bars use slot 1:
-// these are not an ordered value ramp, so a darker-where-bigger gradient
-// would be an anti-pattern.
-// ---------------------------------------------------------------------------
-
-const BAR_LIST_MAX_ROWS = 10;
-
-function aggregateOther(rest) {
-  const count = rest.reduce((a, it) => a + (it.count || 0), 0);
-  const uniques = rest.reduce((a, it) => a + (it.uniques || 0), 0);
-  const peakCount = rest.reduce((a, it) => Math.max(a, it.peakCount || 0), 0);
-  const firstSeen = rest.reduce((min, it) => (
-    it.firstSeen && (!min || it.firstSeen < min) ? it.firstSeen : min
-  ), null);
-  return { label: 'Other', sublabel: `${rest.length} more`, href: null, count, uniques, peakCount, firstSeen };
-}
-
-function buildBarListTable(rows) {
-  const table = el('table', { className: 'datatable' });
-  const thead = el('thead');
-  const headRow = el('tr');
-  for (const h of ['Label', 'Count', 'Uniques', 'Peak', 'First seen']) headRow.append(el('th', { text: h }));
-  thead.append(headRow);
-
-  const tbody = el('tbody');
-  for (const item of rows) {
-    const tr = el('tr');
-    tr.append(el('td', { text: item.label }));
-    tr.append(el('td', { className: 'tabular-nums', text: formatFullCount(item.count || 0) }));
-    tr.append(el('td', { className: 'tabular-nums', text: formatFullCount(item.uniques || 0) }));
-    tr.append(el('td', { className: 'tabular-nums', text: formatFullCount(item.peakCount || 0) }));
-    tr.append(el('td', { text: item.firstSeen ? formatDayLong(item.firstSeen) : '—' }));
-    tbody.append(tr);
-  }
-  table.append(thead, tbody);
-  const scroll = el('div', { className: 'table-scroll' });
-  scroll.append(table);
-  return scroll;
-}
-
-function buildBarListRow(item, maxCount, valueLabel, cleanupFns) {
-  const row = el('div', { className: 'barlist__row' });
-  row.tabIndex = 0;
-  row.style.position = 'relative';
-
-  const href = safeHref(item.href);
-  const labelCol = el('div', { className: 'barlist__label-col' });
-  const labelEl = href ? el('a', { className: 'barlist__label' }) : el('span', { className: 'barlist__label' });
-  labelEl.textContent = item.label;
-  if (href) labelEl.href = href;
-  labelCol.append(labelEl);
-  if (item.sublabel) labelCol.append(el('div', { className: 'barlist__sublabel', text: item.sublabel }));
-
-  const track = el('div', { className: 'bar-track' });
-  const bar = el('div', { className: 'bar' });
-  bar.style.height = '10px';
-  bar.style.borderRadius = '0 4px 4px 0';
-  bar.style.background = seriesColorVar(1);
-  const pct = maxCount > 0 ? ((item.count || 0) / maxCount) * 100 : 0;
-  bar.style.width = `max(2px, ${pct}%)`;
-  track.append(bar);
-
-  const valueEl = el('div', { className: 'barlist__value tabular-nums', text: formatFullCount(item.count || 0) });
-
-  const tip = buildTooltip();
-
-  row.append(labelCol, track, valueEl, tip);
-
-  function showTip(evt) {
-    tip.replaceChildren();
-    tip.append(el('div', { className: 'chart__tip-heading', text: item.label }));
-    tip.append(tipRow(null, formatFullCount(item.count || 0), valueLabel));
-    tip.append(tipRow(null, formatFullCount(item.uniques || 0), 'Uniques'));
-    tip.append(tipRow(null, formatFullCount(item.peakCount || 0), 'Peak'));
-    tip.append(tipRow(null, item.firstSeen ? formatDayLong(item.firstSeen) : '—', 'First seen'));
-    tip.style.display = 'block';
-
-    // Anchor to the pointer on hover; on keyboard focus (no pointer
-    // coordinates) anchor just below the row instead.
-    const rowRect = row.getBoundingClientRect();
-    const hasPointer = evt && typeof evt.clientX === 'number';
-    const anchorX = hasPointer ? evt.clientX - rowRect.left + 8 : 8;
-    const anchorY = hasPointer ? evt.clientY - rowRect.top + 12 : rowRect.height + 6;
-    positionTip(tip, row, anchorX, anchorY);
-  }
-  function hideTip() {
-    tip.style.display = 'none';
-  }
-  function onFocus() {
-    showTip();
-  }
-  row.addEventListener('mouseenter', showTip);
-  row.addEventListener('mouseleave', hideTip);
-  row.addEventListener('focus', onFocus);
-  row.addEventListener('blur', hideTip);
-  cleanupFns.push(() => {
-    row.removeEventListener('mouseenter', showTip);
-    row.removeEventListener('mouseleave', hideTip);
-    row.removeEventListener('focus', onFocus);
-    row.removeEventListener('blur', hideTip);
-  });
-
-  return row;
-}
-
-function buildBarListRows(rows, valueLabel, cleanupFns) {
-  const list = el('div', { className: 'barlist' });
-  const maxCount = Math.max(1, ...rows.map((r) => r.count || 0));
-  for (const item of rows) list.append(buildBarListRow(item, maxCount, valueLabel, cleanupFns));
-  return list;
-}
-
-/**
- * spec = { title, subtitle, items: [{ label, sublabel, href, count, uniques,
- *          peakCount, firstSeen }], emptyMessage, valueLabel }
- */
-export function renderBarList(container, spec) {
-  const {
-    title, subtitle, items = [], emptyMessage = 'No data for this period.', valueLabel = 'Count',
-  } = spec;
-
-  let destroyed = false;
-  let showingTable = false;
-  let cleanupFns = [];
-
-  function runCleanup() {
-    for (const fn of cleanupFns) fn();
-    cleanupFns = [];
-  }
-
-  function toggleTable() {
-    showingTable = !showingTable;
-    draw();
-  }
-
-  function draw() {
-    if (destroyed) return;
-    runCleanup();
-    container.replaceChildren();
-
-    const figure = el('figure', { className: 'chart' });
-    figure.style.position = 'relative';
-    const { figcaption, tableButton } = buildChartHead({
-      title, subtitle, seriesForLegend: null, onToggleTable: toggleTable,
-    });
-    figure.append(figcaption);
-
-    if (items.length === 0) {
-      figure.append(el('p', { className: 'chart__empty', text: emptyMessage }));
-      container.append(figure);
-      return;
-    }
-
-    const top = items.slice(0, BAR_LIST_MAX_ROWS);
-    const rest = items.slice(BAR_LIST_MAX_ROWS);
-    const rows = rest.length ? [...top, aggregateOther(rest)] : top;
-
-    if (showingTable) {
-      tableButton.textContent = 'Chart';
-      figure.append(buildBarListTable(rows));
-    } else {
-      tableButton.textContent = 'Table';
-      figure.append(buildBarListRows(rows, valueLabel, cleanupFns));
-    }
-    container.append(figure);
-  }
-
-  draw();
-
-  return {
-    destroy() {
-      destroyed = true;
-      runCleanup();
-    },
-  };
 }

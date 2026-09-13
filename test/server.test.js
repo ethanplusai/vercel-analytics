@@ -2,9 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { main, isInvokedDirectly } from '../server.js';
+import serverHandler from '../server.js';
+import apiIndexHandler from '../api/index.js';
 
 // Regression coverage for a real bug: server.js's own "was I run directly"
 // guard used to also match bin/start.js's path (both end in "*.js" that the
@@ -81,4 +84,36 @@ test('node bin/start.js binds exactly once and never throws EADDRINUSE', async (
 
   child.kill();
   await exited;
+});
+
+// Regression coverage for the "deploy succeeds, serves nothing" bug: Vercel's
+// zero-config Node builder only turns files under `api/` into functions, so
+// a bare top-level `server.js` is never routed to at all. `api/index.js`
+// must re-export the exact same handler server.js builds for this purpose.
+test('api/index.js re-exports the exact same default handler as server.js', () => {
+  assert.equal(typeof apiIndexHandler, 'function');
+  assert.equal(apiIndexHandler, serverHandler);
+});
+
+test('vercel.json rewrites every path to the api/index function and exposes no static directory', () => {
+  const HERE_ROOT = join(HERE, '..');
+  const config = JSON.parse(readFileSync(join(HERE_ROOT, 'vercel.json'), 'utf8'));
+
+  assert.ok(config.functions?.['api/index.js'], 'the deployed function must be configured');
+  // A large account fans out one upstream call per project (and per
+  // dimension, once a panel is opened) — the default duration is nowhere
+  // near enough headroom for that.
+  assert.ok(config.functions['api/index.js'].maxDuration >= 30);
+
+  // Every request must be rewritten to the one function so its host guard
+  // and login gate run — nothing here may open a static route to `web/`,
+  // and `public/` must never appear anywhere in this config (Vercel serves
+  // a top-level `public/` straight from its CDN, ahead of any function,
+  // which would bypass the login gate entirely).
+  const raw = JSON.stringify(config);
+  assert.doesNotMatch(raw, /\bpublic\//);
+  assert.ok(
+    config.rewrites?.some((r) => r.destination === '/api/index' && /\(\.\*\)|\*/.test(r.source)),
+    'every path must rewrite to the api/index function',
+  );
 });

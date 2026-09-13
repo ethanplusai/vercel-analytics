@@ -588,10 +588,9 @@ a { color: inherit; }
   min-width: 140px;
 }
 
-/* charts.js (Task 8) renders its legend/tooltip/empty-state markup under
-   these exact class names rather than the generic `.legend`/`.legend__key`
-   above; both are kept so renderTimeSeries/renderBarList (used by the repo
-   detail view) are already styled once that view exists. */
+/* charts.js renders renderTimeSeries' legend/tooltip/empty-state markup
+   under these exact class names rather than the generic `.legend`/
+   `.legend__key` above. */
 .chart__plot { position: relative; }
 .chart__legend { display: flex; gap: 12px; font-size: 12px; color: var(--text-secondary); }
 .chart__legend-item { display: flex; align-items: center; }
@@ -611,54 +610,7 @@ a { color: inherit; }
 .chart__tip-label { color: var(--text-secondary); }
 
 /* ---------------------------------------------------------------------
-   11. Bar list
-   --------------------------------------------------------------------- */
-
-.barlist__row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1.3fr) minmax(80px, 2fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 7px 6px;
-  border-radius: var(--radius-sm);
-}
-
-.barlist__row:hover, .barlist__row:focus-visible {
-  background: var(--surface-2);
-}
-
-.bar-track {
-  background: var(--surface-2);
-  border-radius: 0 4px 4px 0;
-  height: 10px;
-}
-
-.bar {
-  height: 10px;
-  background: var(--series-1);
-  border-radius: 0 4px 4px 0;
-}
-
-.barlist__value {
-  font-variant-numeric: tabular-nums;
-  font-size: 13px;
-}
-
-.barlist__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-}
-
-/* charts.js wraps each row's label in these two, for a referrer/path's
-   sublabel line (see the note above the `.chart__legend*` block). */
-.barlist { display: flex; flex-direction: column; }
-.barlist__label-col { display: flex; flex-direction: column; min-width: 0; }
-.barlist__sublabel { font-size: 11px; color: var(--text-secondary); }
-
-/* ---------------------------------------------------------------------
-   12. Data table
+   11. Data table
    --------------------------------------------------------------------- */
 
 .datatable {
@@ -690,7 +642,7 @@ a { color: inherit; }
 }
 
 /* ---------------------------------------------------------------------
-   13. Empty & error states
+   12. Empty & error states
    --------------------------------------------------------------------- */
 
 .empty {
@@ -713,7 +665,7 @@ a { color: inherit; }
 }
 
 /* ---------------------------------------------------------------------
-   14. Utility
+   13. Utility
    --------------------------------------------------------------------- */
 
 .visually-hidden {
@@ -736,7 +688,7 @@ a { color: inherit; }
 .is-loading { opacity: .55; transition: opacity .15s ease; }
 
 /* ---------------------------------------------------------------------
-   15. Repository detail view (Task 10)
+   14. Repository detail view (Task 10)
    --------------------------------------------------------------------- */
 
 .detail__head {
@@ -846,7 +798,7 @@ a { color: inherit; }
 }
 
 /* ---------------------------------------------------------------------
-   16. Manage-repositories panel (Task 11)
+   15. Manage-repositories panel (Task 11)
 
    Inline and collapsible, not a modal: it renders in normal flow beneath
    the controls row, so no `position: fixed`, no backdrop, no scroll lock.
@@ -943,7 +895,7 @@ a { color: inherit; }
 }
 
 /* ---------------------------------------------------------------------
-   17. Dashboard (Task 7) — overview, project rows, dimension panels
+   16. Dashboard (Task 7) — overview, project rows, dimension panels
 
    Dimension and project rows use native <details>/<summary> for the
    open/close disclosure: no modal, no custom keyboard handling to get
@@ -1034,7 +986,7 @@ details.panel > summary::-webkit-details-marker {
 }
 
 /* ---------------------------------------------------------------------
-   18. Loading skeletons
+   17. Loading skeletons
    --------------------------------------------------------------------- */
 
 .skeleton {

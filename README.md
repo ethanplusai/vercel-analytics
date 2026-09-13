@@ -40,7 +40,7 @@ All configuration is environment variables. Only `VERCEL_TOKEN` is required.
 |---|---|---|
 | `VERCEL_TOKEN` | — | **Required.** A Vercel access token with read access. |
 | `PORT` (or `VA_PORT`) | `4320` | Port to listen on. `PORT` takes precedence if both are set. |
-| `VA_HOST` | `127.0.0.1` | Interface to bind to. |
+| `VA_HOST` | `127.0.0.1` | Interface to bind to. Any value other than `127.0.0.1`, `::1`, `localhost` or unset — `0.0.0.0` included — counts as exposed beyond loopback, the same as running on Vercel or setting `VA_ALLOWED_HOSTS` (see [Deployment](#deployment)). |
 | `VA_API_BASE_URL` | `https://api.vercel.com` | Override the Vercel API base URL. Mainly for tests. |
 | `VA_PASSWORD` | — | Passphrase login. Required once the server is reachable beyond loopback (see [Deployment](#deployment)). Must be 20+ characters after trimming. |
 | `VA_ALLOW_PUBLIC` | `0` | Deliberate override to run exposed beyond loopback with **no** passphrase. |
@@ -161,7 +161,10 @@ The combined daily series across every project. `range` defaults to `30`.
 A breakdown by one dimension, combined across projects (or scoped to one
 project with `projectId`). `:name` must be one of the allowlisted
 dimensions: `country`, `referrer_hostname`, `device_type`, `browser_name`,
-`os_name`, `request_path`, `route`. Any other value is a `400`.
+`os_name`, `request_path`, `route`. Any other value is a `400`. A
+`projectId` that doesn't resolve to an analytics-enabled project is a `404`,
+the same as `GET /api/projects/:id` — an unknown project never comes back
+as a silent, empty breakdown.
 
 ```json
 {
@@ -200,7 +203,7 @@ Two ways to use this outside its own dashboard:
   (`test/**/*.test.js`) requires Node 22; the test suite will not discover
   its files on Node 20 or 21.
 
-The suite currently stands at **98 passing tests, 0 failing** (`npm test`,
+The suite currently stands at **110 passing tests, 0 failing** (`npm test`,
 run on Node 22.23.1).
 
 ## The reporting-window caveat
@@ -222,15 +225,54 @@ reporting window") rather than guessing or hiding it.
 ## Deployment
 
 This is a plain Node HTTP server — deploy it anywhere Node runs, including
-as a Vercel serverless function (`server.js` exports a handler Vercel's
-platform can call directly). Two startup checks exist to keep an exposed
-instance from being an accidental open door onto your traffic data:
+as a self-hosted process behind your own reverse proxy, or as a Vercel
+project.
+
+### Deploying to Vercel
+
+`api/index.js` re-exports the same default handler `server.js` builds for
+this purpose, and `vercel.json` rewrites every path to that one function —
+Vercel's zero-config builder only turns files under `api/` into functions,
+so without both of these a deploy would succeed and serve nothing (a bare
+top-level `server.js` is never routed to). The assets the dashboard serves
+live in `web/`, deliberately never `public/`: Vercel serves a top-level
+`public/` directory straight from its CDN, ahead of any function, which
+would bypass the login gate entirely. `web/` isn't a name Vercel treats
+specially and `vercel.json` declares no static routing for it either, so
+every single request — including `/`, `/app.js`, `/styles.css` — is
+rewritten to the function first and only reaches those files (or gets
+turned away) after the host guard and login gate below have run.
+
+1. Push this repo to your own Git provider and import it into Vercel (or
+   run `vercel deploy` from a checkout), with no build command and no
+   output directory — there's nothing to build.
+2. Set environment variables on the Vercel project: `VERCEL_TOKEN` as
+   always, plus `VA_PASSWORD` **and** `VA_ALLOWED_HOSTS` — **both are
+   required on Vercel**, not optional extras. Vercel sets `VERCEL=1` for
+   you, which alone trips the "reachable beyond loopback" guard below, and
+   without either variable the app refuses to start at all (see
+   [The two startup guards](#the-two-startup-guards)):
+   - `VERCEL_TOKEN` — a Vercel access token with read access.
+   - `VA_PASSWORD` — 20+ characters after trimming. Skipping this in favour
+     of `VA_ALLOW_PUBLIC=1` deliberately publishes your traffic data with
+     no login.
+   - `VA_ALLOWED_HOSTS` — the hostname(s) Vercel serves this project on
+     (your `*.vercel.app` domain, plus any custom domain you attach), e.g.
+     `analytics.example.com` or `my-project.vercel.app`.
+3. Deploy. `GET /api/health` should return `{"ok":true}` once you're
+   signed in at `/login`.
+
+### The two startup guards
+
+Two checks exist to keep an exposed instance — Vercel or self-hosted — from
+being an accidental open door onto your traffic data. Both run at startup,
+not at request time, and both name their own fix in the error message:
 
 - **No passphrase, no public exposure.** If the server is reachable beyond
-  loopback (detected by running on Vercel, or by `VA_ALLOWED_HOSTS` being
-  set) and `VA_PASSWORD` isn't set, startup fails with an error naming the
-  fix: set `VA_PASSWORD` (20+ characters), or set `VA_ALLOW_PUBLIC=1` to
-  deliberately run it with no login.
+  loopback (running on Vercel, `VA_ALLOWED_HOSTS` set, or `VA_HOST` bound to
+  anything but a loopback address) and `VA_PASSWORD` isn't set, startup
+  fails with an error naming the fix: set `VA_PASSWORD` (20+ characters), or
+  set `VA_ALLOW_PUBLIC=1` to deliberately run it with no login.
 - **`VA_ALLOWED_HOSTS` is required once exposed.** Every request — including
   `/login` — is checked against an allowlist of loopback names plus whatever
   `VA_ALLOWED_HOSTS` adds. Deploy without setting it and the server starts
@@ -238,6 +280,3 @@ instance from being an accidental open door onto your traffic data:
   broken login rather than a missing setting — so startup fails early
   instead, naming exactly which variable to set: list the hostname(s) this
   deployment is served on (e.g. `analytics.example.com`).
-
-Both failures happen at startup, not at request time, and both name their
-own fix in the error message.

@@ -28,6 +28,18 @@ test('exposure is driven by VERCEL or a non-empty host allowlist, not by VERCEL 
   assert.equal(loadConfig({}).exposedBeyondLoopback, false);
 });
 
+test('a non-loopback VA_HOST also counts as exposure, including 0.0.0.0', () => {
+  assert.equal(loadConfig({ VA_HOST: '0.0.0.0' }).exposedBeyondLoopback, true);
+  assert.equal(loadConfig({ VA_HOST: '192.168.1.50' }).exposedBeyondLoopback, true);
+});
+
+test('every documented loopback form for VA_HOST stays unexposed', () => {
+  assert.equal(loadConfig({ VA_HOST: '127.0.0.1' }).exposedBeyondLoopback, false);
+  assert.equal(loadConfig({ VA_HOST: '::1' }).exposedBeyondLoopback, false);
+  assert.equal(loadConfig({ VA_HOST: 'localhost' }).exposedBeyondLoopback, false);
+  assert.equal(loadConfig({}).exposedBeyondLoopback, false, 'an unset VA_HOST defaults to loopback');
+});
+
 test('secure cookies follow exposure but can be overridden explicitly', () => {
   assert.equal(loadConfig({ VERCEL: '1' }).secureCookies, true);
   assert.equal(loadConfig({ VERCEL: '1', VA_SECURE_COOKIES: '0' }).secureCookies, false);

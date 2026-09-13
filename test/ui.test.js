@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  formatCount, formatVisitorsSumNote, reportingWindowNote, pluralise, relativeTime,
+  formatCount, formatVisitorsSumNote, reportingWindowNote, pluralise, relativeTime, describeFailures,
 } from '../web/ui.js';
 
 test('counts are grouped for readability', () => {
@@ -44,4 +44,33 @@ test('relativeTime reports a short human string relative to a pinned now', () =>
   assert.equal(relativeTime(null, now), 'never');
   assert.equal(relativeTime('2026-09-04T11:59:30.000Z', now), 'just now');
   assert.equal(relativeTime('2026-09-04T10:00:00.000Z', now), '2 hours ago');
+});
+
+test('describeFailures is null when there is nothing to report', () => {
+  assert.equal(describeFailures([]), null);
+  assert.equal(describeFailures(undefined), null);
+});
+
+test('describeFailures never calls a failure a "project" regardless of its scope', () => {
+  const text = describeFailures([{ scope: 'teams', type: 'server', message: 'boom' }]);
+  assert.match(text, /teams/);
+  assert.doesNotMatch(text, /\bproject\b/i, 'a teams-scope failure is not a project');
+});
+
+test('describeFailures names every distinct scope that failed', () => {
+  const text = describeFailures([
+    { scope: 'acme-site', type: 'server', message: 'boom' },
+    { scope: 'acme-blog', type: 'server', message: 'boom' },
+  ]);
+  assert.match(text, /acme-site/);
+  assert.match(text, /acme-blog/);
+});
+
+test('describeFailures calls out an authentication failure prominently, distinct from an ordinary one', () => {
+  const authText = describeFailures([{ scope: 'teams', type: 'auth', message: 'Invalid token' }]);
+  assert.match(authText, /token/i);
+
+  const ordinaryText = describeFailures([{ scope: 'acme-site', type: 'server', message: 'boom' }]);
+  assert.notEqual(authText, ordinaryText);
+  assert.doesNotMatch(ordinaryText, /token/i);
 });

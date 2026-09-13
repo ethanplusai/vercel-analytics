@@ -53,60 +53,6 @@ export function sendError(res, status, code, message) {
   sendJson(res, status, { error: { code, message } });
 }
 
-export function readJsonBody(req, { limit = 1_000_000 } = {}) {
-  return new Promise((resolvePromise, reject) => {
-    const chunks = [];
-    let length = 0;
-    let settled = false;
-
-    const fail = (err) => {
-      if (settled) return;
-      settled = true;
-      reject(err);
-    };
-
-    req.on('data', (chunk) => {
-      if (settled) return;
-      length += chunk.length;
-      if (length > limit) {
-        const err = new Error('Request body too large');
-        err.code = 'TOO_LARGE';
-        // Defer the destroy so the handler's error response (built from the
-        // rejection below) has a chance to flush before the socket is torn
-        // down; destroying synchronously here would abort the connection
-        // before any response bytes reach the client.
-        setImmediate(() => req.destroy());
-        fail(err);
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    req.on('error', (err) => {
-      fail(err);
-    });
-
-    req.on('end', () => {
-      if (settled) return;
-      const raw = Buffer.concat(chunks).toString('utf8');
-      if (raw.length === 0) {
-        settled = true;
-        resolvePromise({});
-        return;
-      }
-      try {
-        const parsed = JSON.parse(raw);
-        settled = true;
-        resolvePromise(parsed);
-      } catch {
-        const err = new Error('Malformed JSON body');
-        err.code = 'BAD_JSON';
-        fail(err);
-      }
-    });
-  });
-}
-
 export function createRouter() {
   const routes = [];
 

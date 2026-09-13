@@ -74,6 +74,33 @@ export function reportingWindowNote(days, pageviews) {
   return `Days before ${firstDay} are outside your plan's reporting window (Hobby keeps 1 month, Pro 12).`;
 }
 
+/**
+ * Turns a list of `{ scope, type, message }` failures (as returned by every
+ * data route's `failures` array) into one notice sentence, or `null` when
+ * there is nothing to report.
+ *
+ * Two things this deliberately gets right, both bugs in an earlier version:
+ * - It never calls every failure a "project". A `teams`-scope failure is
+ *   the whole team-discovery call failing, not a project; a per-project
+ *   query failure names that project. Saying "N projects could not be
+ *   read: teams" is simply wrong, so this describes what actually failed
+ *   using each failure's own `scope` instead of a fixed noun.
+ * - An authentication failure (`type === 'auth'` — a wrong or expired
+ *   VERCEL_TOKEN, surfaced by Vercel as a 401) is called out by name and
+ *   phrased differently from an ordinary failure. `/api/overview` still
+ *   returns 200 with an all-zero series when every project fails this way,
+ *   which reads exactly like a quiet week unless the notice itself makes
+ *   the real cause unmistakable.
+ */
+export function describeFailures(failures) {
+  if (!failures?.length) return null;
+  const scopes = [...new Set(failures.map((f) => f.scope))].join(', ');
+  if (failures.some((f) => f.type === 'auth')) {
+    return `Vercel rejected the API token — check VERCEL_TOKEN. Could not read: ${scopes}.`;
+  }
+  return `Could not read ${pluralise(failures.length, 'source', 'sources')}: ${scopes}.`;
+}
+
 const DIRECT_PROPS = ['className', 'id', 'type', 'href', 'title', 'disabled', 'tabIndex', 'open', 'value'];
 
 /**

@@ -6,7 +6,7 @@
 // drill-down views, so there is nothing here to hash-route between.
 
 import {
-  el, clear, relativeTime, pluralise,
+  el, clear, relativeTime, describeFailures,
 } from './ui.js';
 import { getProjects, getOverview } from './api.js';
 import { renderOverview } from './views/overview.js';
@@ -131,13 +131,16 @@ function selectRange(value) {
 
 function renderFailuresNotice(failures) {
   clear(noticesEl);
-  if (!failures.length) return;
+  const text = describeFailures(failures);
+  if (!text) return;
 
-  const names = failures.map((f) => f.scope).join(', ');
-  const notice = el('div', { className: 'notice notice--warn' });
-  const body = el('div', { className: 'notice__body' }, [
-    `${pluralise(failures.length, 'project', 'projects')} could not be read: ${names}`,
-  ]);
+  // An authentication failure gets the louder treatment (`notice--error`,
+  // the same class an outright load error would use) rather than the quiet
+  // warning style — a wrong or expired VERCEL_TOKEN should be unmistakable,
+  // not one dismissible line away from reading as an ordinary quiet week.
+  const isAuth = failures.some((f) => f.type === 'auth');
+  const notice = el('div', { className: `notice notice--${isAuth ? 'error' : 'warn'}` });
+  const body = el('div', { className: 'notice__body' }, [text]);
   const close = el('button', {
     className: 'btn btn--icon notice__close',
     type: 'button',

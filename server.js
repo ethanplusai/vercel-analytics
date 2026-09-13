@@ -19,8 +19,7 @@ function defaultSleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
-// Read an `application/x-www-form-urlencoded` body, bounded the same way
-// `readJsonBody` in src/http.js bounds a JSON body: accumulate, reject past
+// Read an `application/x-www-form-urlencoded` body: accumulate, reject past
 // a size limit, destroy the socket rather than keep buffering. Kept local to
 // server.js (rather than added to http.js) because it's login-form-specific.
 function readFormBody(req, { limit = 1_000_000 } = {}) {

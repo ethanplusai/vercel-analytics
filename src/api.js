@@ -22,6 +22,8 @@ export const DIMENSIONS = [
 ];
 const DIMENSION_SET = new Set(DIMENSIONS);
 
+const PROJECT_NOT_FOUND_MESSAGE = 'No analytics-enabled project with that id.';
+
 function isoDay(date) {
   return date.toISOString().slice(0, 10);
 }
@@ -37,52 +39,80 @@ export function createApi({ config, client, cache, now = () => new Date() }) {
   const router = createRouter();
   const serveStatic = createStaticHandler({ root: PUBLIC_DIR });
 
-  // Discover every analytics-enabled project the token can see, once per TTL.
-  async function discover() {
-    return cache.wrap('projects', async () => {
-      const scopes = [{ teamId: undefined, slug: null, name: 'Personal' }];
-      let teams = [];
-      try {
-        teams = await client.listTeams();
-      } catch (err) {
-        return { projects: [], failures: [{ scope: 'teams', message: err.message }] };
-      }
-      for (const t of teams) {
-        if (config.teams.length && !config.teams.includes(t.slug)) continue;
-        scopes.push({ teamId: t.id, slug: t.slug, name: t.name });
-      }
+  // Runs the actual discovery: every scope (personal, plus each team the
+  // token can see) queried for its projects, merged and de-duplicated. Never
+  // throws — a failure at any stage (listTeams, or one scope's listProjects)
+  // is recorded in `failures` and everything else still gets queried, so a
+  // single upstream failure degrades the result instead of emptying it.
+  async function runDiscovery() {
+    const scopes = [{ teamId: undefined, slug: null, name: 'Personal' }];
+    const failures = [];
 
-      const results = await mapPool(scopes, config.concurrency, async (scope) => {
-        const list = await client.listProjects({ teamId: scope.teamId });
-        return list.map((p) => ({ ...p, team: scope.name, teamSlug: scope.slug, teamId: scope.teamId }));
-      });
+    // A failed listTeams() must not skip the personal scope below — it
+    // needs no teams call at all, so there is no reason personal projects
+    // should vanish just because team discovery failed (a 429/5xx surviving
+    // retries, or an expired token).
+    let teams = [];
+    try {
+      teams = await client.listTeams();
+    } catch (err) {
+      failures.push({ scope: 'teams', type: err.kind ?? 'unknown', message: err.message });
+    }
+    for (const t of teams) {
+      if (config.teams.length && !config.teams.includes(t.slug)) continue;
+      scopes.push({ teamId: t.id, slug: t.slug, name: t.name });
+    }
 
-      // A project belongs to exactly one real scope, but keep this
-      // defensive: de-duplicate by id so a scope that reports a project
-      // already seen (a quirky API response, or a token whose personal and
-      // team listings overlap) can never double-count it in a combined
-      // total. A team-scoped copy is preferred over the personal one when
-      // both exist: the personal scope carries `teamId: undefined`, so if
-      // the surviving record were the personal copy, `perProject` below
-      // would query Vercel for it with no teamId — the wrong scope for a
-      // project that actually lives under a team. Among same-typed
-      // duplicates (two teams both listing it, say), first occurrence wins.
-      const byId = new Map();
-      const failures = [];
-      results.forEach((r, i) => {
-        if (r.ok) {
-          for (const p of r.value) {
-            const existing = byId.get(p.id);
-            if (!existing || (existing.teamId == null && p.teamId != null)) {
-              byId.set(p.id, p);
-            }
-          }
-        } else {
-          failures.push({ scope: scopes[i].slug ?? 'personal', message: r.error.message });
-        }
-      });
-      return { projects: [...byId.values()], failures };
+    const results = await mapPool(scopes, config.concurrency, async (scope) => {
+      const list = await client.listProjects({ teamId: scope.teamId });
+      return list.map((p) => ({ ...p, team: scope.name, teamSlug: scope.slug, teamId: scope.teamId }));
     });
+
+    // A project belongs to exactly one real scope, but keep this
+    // defensive: de-duplicate by id so a scope that reports a project
+    // already seen (a quirky API response, or a token whose personal and
+    // team listings overlap) can never double-count it in a combined
+    // total. A team-scoped copy is preferred over the personal one when
+    // both exist: the personal scope carries `teamId: undefined`, so if
+    // the surviving record were the personal copy, `perProject` below
+    // would query Vercel for it with no teamId — the wrong scope for a
+    // project that actually lives under a team. Among same-typed
+    // duplicates (two teams both listing it, say), first occurrence wins.
+    const byId = new Map();
+    results.forEach((r, i) => {
+      if (r.ok) {
+        for (const p of r.value) {
+          const existing = byId.get(p.id);
+          if (!existing || (existing.teamId == null && p.teamId != null)) {
+            byId.set(p.id, p);
+          }
+        }
+      } else {
+        failures.push({
+          scope: scopes[i].slug ?? 'personal', type: r.error.kind ?? 'unknown', message: r.error.message,
+        });
+      }
+    });
+    return { projects: [...byId.values()], failures };
+  }
+
+  // Discover every analytics-enabled project the token can see, once per
+  // TTL. A degraded result (any failures at all — teams or a scope) is
+  // never cached: cache.wrap only withholds a REJECTED loader from the
+  // cache, but runDiscovery() always resolves (so a failed listTeams()
+  // doesn't also wipe the personal scope, see above) — so this wraps the
+  // cache itself rather than relying on wrap() to notice the failure.
+  // Caching a degraded result would mean Refresh cannot recover for the
+  // whole TTL even after the underlying problem (an expired token, a
+  // transient 5xx) is fixed.
+  async function discover() {
+    const hit = cache.get('projects');
+    if (hit) return hit;
+    const result = await runDiscovery();
+    if (result.failures.length === 0) {
+      return cache.set('projects', result);
+    }
+    return { value: result, storedAt: now().getTime() };
   }
 
   // Fan out one analytics query per project and collect partial failures.
@@ -100,7 +130,7 @@ export function createApi({ config, client, cache, now = () => new Date() }) {
     const failures = [];
     results.forEach((r, i) => {
       if (r.ok) ok.push(r.value);
-      else failures.push({ scope: targets[i].name, message: r.error.message });
+      else failures.push({ scope: targets[i].name, type: r.error.kind ?? 'unknown', message: r.error.message });
     });
     // The age shown is the worst case, not a flattering one: the OLDEST
     // contributing response, because cache entries expire independently and
@@ -136,7 +166,7 @@ export function createApi({ config, client, cache, now = () => new Date() }) {
     const { value } = await discover();
     const project = value.projects.find((p) => p.id === ctx.params.id);
     if (!project) {
-      sendError(res, 404, 'not_found', 'No analytics-enabled project with that id.');
+      sendError(res, 404, 'not_found', PROJECT_NOT_FOUND_MESSAGE);
       return;
     }
     const q = await perProject({
@@ -177,11 +207,21 @@ export function createApi({ config, client, cache, now = () => new Date() }) {
       sendError(res, 400, 'unknown_dimension', `Not a supported dimension: ${name}`);
       return;
     }
+    const projectId = ctx.query.projectId ?? null;
     const { sinceDay, untilDay } = resolveRange(ctx.query.range, now());
     const { value } = await discover();
+    // Consistent with GET /api/projects/:id: an unknown/unresolvable
+    // project id is a 404, not a silently empty result. Without this check,
+    // `perProject`'s filter below simply matches nothing and the response
+    // reads as "this project has no traffic" rather than "this project
+    // doesn't exist" — indistinguishable from a real quiet week.
+    if (projectId && !value.projects.some((p) => p.id === projectId)) {
+      sendError(res, 404, 'not_found', PROJECT_NOT_FOUND_MESSAGE);
+      return;
+    }
     const q = await perProject({
       projects: value.projects, since: sinceDay, until: untilDay,
-      by: name, projectFilter: ctx.query.projectId ?? null,
+      by: name, projectFilter: projectId,
     });
     sendJson(res, 200, {
       dimension: name,

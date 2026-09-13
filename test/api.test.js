@@ -196,6 +196,66 @@ test('when personal and a team both report the same project id, the team-scoped 
   });
 });
 
+test('a failing listTeams still returns personal-scope projects, with a recorded failure', async () => {
+  const client = {
+    listTeams: async () => { throw new Error('teams unavailable'); },
+    listProjects: async ({ teamId } = {}) => {
+      assert.equal(teamId, undefined, 'only the personal scope should ever be queried once teams fails');
+      return [{ id: 'prj_solo', name: 'solo-site', enabledAt: 1 }];
+    },
+    visitsAggregate: async () => [],
+  };
+  await withApi({ client }, async (base) => {
+    const body = await (await fetch(`${base}/api/projects`)).json();
+    assert.equal(body.projects.length, 1, 'the personal scope must still be queried and returned');
+    assert.equal(body.projects[0].name, 'solo-site');
+    assert.equal(body.failures.length, 1);
+    assert.equal(body.failures[0].scope, 'teams');
+    assert.equal(body.failures[0].type, 'unknown');
+    assert.match(body.failures[0].message, /teams unavailable/);
+  });
+});
+
+test('a degraded discovery result is not cached — the next call re-attempts listTeams', async () => {
+  let calls = 0;
+  const client = {
+    listTeams: async () => {
+      calls += 1;
+      throw new Error('teams unavailable');
+    },
+    listProjects: async () => [{ id: 'prj_solo', name: 'solo-site', enabledAt: 1 }],
+    visitsAggregate: async () => [],
+  };
+  await withApi({ client }, async (base) => {
+    await fetch(`${base}/api/projects`);
+    await fetch(`${base}/api/projects`);
+    assert.equal(calls, 2, 'a degraded (failures-non-empty) discovery must never be cached, so Refresh can recover');
+  });
+});
+
+test('a clean discovery result IS cached — a second call does not re-query listTeams', async () => {
+  let calls = 0;
+  const client = stubClient({ projects: [{ id: 'prj_1', name: 'acme-site', enabledAt: 1 }] });
+  const realListTeams = client.listTeams;
+  client.listTeams = async () => { calls += 1; return realListTeams(); };
+  await withApi({ client }, async (base) => {
+    await fetch(`${base}/api/projects`);
+    await fetch(`${base}/api/projects`);
+    assert.equal(calls, 1, 'a clean result should still be served from cache within the TTL');
+  });
+});
+
+test('GET /api/dimension/:name 404s for an unknown projectId, matching /api/projects/:id', async () => {
+  const client = stubClient({ projects: [{ id: 'prj_1', name: 'acme-site', enabledAt: 1 }] });
+  await withApi({ client }, async (base) => {
+    const missing = await fetch(`${base}/api/dimension/country?range=7&projectId=prj_does_not_exist`);
+    assert.equal(missing.status, 404);
+
+    const ok = await fetch(`${base}/api/dimension/country?range=7&projectId=prj_1`);
+    assert.equal(ok.status, 200);
+  });
+});
+
 test('one failing project does not empty the dashboard', async () => {
   let call = 0;
   const client = {
