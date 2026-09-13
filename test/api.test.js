@@ -1,0 +1,111 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { createApi, DIMENSIONS, resolveRange } from '../src/api.js';
+import { loadConfig } from '../src/config.js';
+import { createCache } from '../src/cache.js';
+
+const NOW = new Date('2026-09-13T12:00:00Z');
+
+function stubClient({ projects = [], rows = [] } = {}) {
+  return {
+    listTeams: async () => [{ id: 'team_example', slug: 'acme', name: 'Acme' }],
+    listProjects: async () => projects,
+    visitsAggregate: async () => rows,
+  };
+}
+
+async function withApi({ client = stubClient(), env = {} }, fn) {
+  const config = loadConfig(env);
+  const handler = createApi({
+    config,
+    client,
+    cache: createCache({ ttlMs: 1000, now: () => Date.now() }),
+    now: () => NOW,
+  });
+  const server = createServer(handler);
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try { await fn(base); } finally { server.close(); }
+}
+
+test('resolveRange accepts only the documented windows and defaults to 30', () => {
+  assert.equal(resolveRange('7', NOW).days, 7);
+  assert.equal(resolveRange('365', NOW).days, 365);
+  assert.equal(resolveRange('banana', NOW).days, 30);
+  assert.equal(resolveRange(undefined, NOW).days, 30);
+});
+
+test('resolveRange does not resolve inherited Object.prototype keys', () => {
+  // A bare `rangeParam in TABLE` check would treat 'constructor' as valid.
+  assert.equal(resolveRange('constructor', NOW).days, 30);
+  assert.equal(resolveRange('toString', NOW).days, 30);
+});
+
+test('GET /api/projects lists analytics-enabled projects with their team', async () => {
+  const client = stubClient({ projects: [{ id: 'prj_1', name: 'acme-site', enabledAt: 1 }] });
+  await withApi({ client }, async (base) => {
+    const body = await (await fetch(`${base}/api/projects`)).json();
+    assert.equal(body.projects.length > 0, true);
+    assert.equal(body.projects[0].name, 'acme-site');
+    assert.ok(body.fetchedAt);
+  });
+});
+
+test('GET /api/overview sums pageviews and reports visitorsSum, never visitors', async () => {
+  const client = stubClient({
+    projects: [{ id: 'prj_1', name: 'one', enabledAt: 1 }, { id: 'prj_2', name: 'two', enabledAt: 1 }],
+    rows: [{ timestamp: '2026-09-13T00:00:00.000Z', pageviews: 10, visitors: 4 }],
+  });
+  await withApi({ client }, async (base) => {
+    const body = await (await fetch(`${base}/api/overview?range=7`)).json();
+    // Both projects return the same stub row, so pageviews double.
+    assert.equal(body.totals.pageviews, 20);
+    assert.equal(body.totals.visitorsSum, 8);
+    assert.equal('visitors' in body.totals, false, 'a key named `visitors` would be read as a unique count');
+  });
+});
+
+test('an unknown dimension is rejected rather than passed upstream', async () => {
+  await withApi({}, async (base) => {
+    const res = await fetch(`${base}/api/dimension/not_a_dimension?range=7`);
+    assert.equal(res.status, 400);
+  });
+});
+
+test('an inherited property name is not a valid dimension', async () => {
+  await withApi({}, async (base) => {
+    assert.equal((await fetch(`${base}/api/dimension/constructor`)).status, 400);
+  });
+});
+
+test('every allowlisted dimension is accepted', async () => {
+  await withApi({}, async (base) => {
+    for (const name of DIMENSIONS) {
+      const res = await fetch(`${base}/api/dimension/${name}?range=7`);
+      assert.equal(res.status, 200, `${name} should be allowed`);
+    }
+  });
+});
+
+test('one failing project does not empty the dashboard', async () => {
+  let call = 0;
+  const client = {
+    listTeams: async () => [{ id: 'team_example', slug: 'acme', name: 'Acme' }],
+    listProjects: async () => [
+      { id: 'prj_ok', name: 'ok', enabledAt: 1 },
+      { id: 'prj_bad', name: 'bad', enabledAt: 1 },
+    ],
+    visitsAggregate: async ({ projectId }) => {
+      call += 1;
+      if (projectId === 'prj_bad') throw new Error('project vanished');
+      return [{ timestamp: '2026-09-13T00:00:00.000Z', pageviews: 6, visitors: 2 }];
+    },
+  };
+  await withApi({ client }, async (base) => {
+    const body = await (await fetch(`${base}/api/overview?range=7`)).json();
+    assert.equal(body.totals.pageviews, 6, 'the healthy project still reports');
+    assert.equal(body.failures.length, 1);
+    assert.match(body.failures[0].message, /vanished/);
+  });
+});
