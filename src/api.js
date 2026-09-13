@@ -122,6 +122,43 @@ export function createApi({ config, client, cache, now = () => new Date() }) {
     });
   });
 
+  // A single project's own daily series. Unlike /api/overview and
+  // /api/dimension/:name, this is scoped to exactly one project — so its
+  // visitor figure IS Vercel's own deduplicated count for that project, and
+  // the field is named `visitors`, never `visitorsSum` (that name is
+  // reserved for a figure summed across projects, which this is not; see
+  // src/aggregate.js's header comment). A project id that does not resolve
+  // to an analytics-enabled project (unknown, deleted, or analytics simply
+  // never turned on) is a 404 either way — discover() only ever returns
+  // analytics-enabled projects, so both cases look identical here.
+  router.get('/api/projects/:id', async (req, res, ctx) => {
+    const { sinceDay, untilDay } = resolveRange(ctx.query.range, now());
+    const { value } = await discover();
+    const project = value.projects.find((p) => p.id === ctx.params.id);
+    if (!project) {
+      sendError(res, 404, 'not_found', 'No analytics-enabled project with that id.');
+      return;
+    }
+    const q = await perProject({
+      projects: value.projects, since: sinceDay, until: untilDay, by: 'day', projectFilter: project.id,
+    });
+    const combined = combineSeries(q.perProject, { sinceDay, untilDay });
+    sendJson(res, 200, {
+      project: {
+        id: project.id, name: project.name, team: project.team, teamSlug: project.teamSlug, enabledAt: project.enabledAt,
+      },
+      days: combined.days,
+      pageviews: combined.pageviews,
+      visitors: combined.visitorsSum,
+      totals: {
+        pageviews: combined.totals.pageviews,
+        visitors: combined.totals.visitorsSum,
+      },
+      failures: [...value.failures, ...q.failures],
+      fetchedAt: q.fetchedAt,
+    });
+  });
+
   router.get('/api/overview', async (req, res, ctx) => {
     const { sinceDay, untilDay } = resolveRange(ctx.query.range, now());
     const { value } = await discover();

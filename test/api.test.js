@@ -74,6 +74,63 @@ test('GET /api/overview sums pageviews and reports visitorsSum, never visitors',
   });
 });
 
+test('GET /api/projects/:id reports one project\'s own daily series as `visitors`, never `visitorsSum`', async () => {
+  const client = stubClient({
+    projects: [{ id: 'prj_1', name: 'acme-site', enabledAt: 1 }, { id: 'prj_2', name: 'acme-blog', enabledAt: 1 }],
+    rows: [{ timestamp: '2026-09-13T00:00:00.000Z', pageviews: 10, visitors: 4 }],
+  });
+  await withApi({ client }, async (base) => {
+    const res = await fetch(`${base}/api/projects/prj_1?range=7`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+
+    assert.equal(body.project.id, 'prj_1');
+    assert.equal(body.project.name, 'acme-site');
+    assert.equal(body.totals.pageviews, 10, 'only the requested project is queried, not both');
+    // Scoped to exactly one project, so this figure IS Vercel's own
+    // deduplicated count — the endpoint must name it `visitors`, and must
+    // never carry a `visitorsSum` key (that name means "summed across
+    // projects", which a single-project response never is).
+    assert.equal(body.totals.visitors, 4);
+    assert.equal('visitorsSum' in body.totals, false, 'a single project\'s figure must never be named visitorsSum');
+    assert.equal('visitorsSum' in body, false);
+    assert.ok(Array.isArray(body.days));
+    assert.ok(Array.isArray(body.pageviews));
+    assert.ok(Array.isArray(body.visitors));
+    assert.ok(body.fetchedAt);
+  });
+});
+
+test('GET /api/projects/:id 404s for an id with no analytics-enabled project', async () => {
+  const client = stubClient({ projects: [{ id: 'prj_1', name: 'acme-site', enabledAt: 1 }] });
+  await withApi({ client }, async (base) => {
+    const missing = await fetch(`${base}/api/projects/prj_does_not_exist?range=7`);
+    assert.equal(missing.status, 404);
+
+    // A project the token can see but that never turned Web Analytics on
+    // looks identical here: discover() never returns it at all, so it 404s
+    // the same way an unknown id does.
+    const notEnabled = await fetch(`${base}/api/projects/prj_no_analytics?range=7`);
+    assert.equal(notEnabled.status, 404);
+  });
+});
+
+test('GET /api/projects/:id only queries the one requested project upstream', async () => {
+  const calls = [];
+  const client = {
+    listTeams: async () => [],
+    listProjects: async () => [
+      { id: 'prj_1', name: 'acme-site', enabledAt: 1 },
+      { id: 'prj_2', name: 'acme-blog', enabledAt: 1 },
+    ],
+    visitsAggregate: async (args) => { calls.push(args.projectId); return []; },
+  };
+  await withApi({ client }, async (base) => {
+    await fetch(`${base}/api/projects/prj_1?range=7`);
+    assert.deepEqual(calls, ['prj_1'], 'the other project must never be queried for a single-project view');
+  });
+});
+
 test('an unknown dimension is rejected rather than passed upstream', async () => {
   await withApi({}, async (base) => {
     const res = await fetch(`${base}/api/dimension/not_a_dimension?range=7`);

@@ -55,6 +55,11 @@ export function getOverview(range, { signal } = {}) {
   return request(`/api/overview${qs}`, { signal });
 }
 
+export function getProject(id, { range, signal } = {}) {
+  const qs = range ? `?range=${encodeURIComponent(range)}` : '';
+  return request(`/api/projects/${encodeURIComponent(id)}${qs}`, { signal });
+}
+
 export function getDimension(name, { range, projectId, signal } = {}) {
   const params = new URLSearchParams();
   if (range) params.set('range', range);

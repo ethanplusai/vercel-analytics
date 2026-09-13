@@ -1023,13 +1023,9 @@ details.panel > summary::-webkit-details-marker {
   font-variant-numeric: tabular-nums;
 }
 
-.project-row__bar-track {
-  margin: 8px 0;
+.project-row__spark {
+  margin-top: 10px;
   max-width: 320px;
-}
-
-.project-row__share {
-  font-size: 12px;
 }
 
 .dim-row--others td:first-child {

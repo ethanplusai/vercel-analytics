@@ -238,7 +238,18 @@ export default async function handler(req, res) {
   return app.handler(req, res);
 }
 
-const invokedDirectly = process.argv[1] && /(^|[\\/])(server\.js|start\.js)$/.test(process.argv[1]);
+// Matches ONLY server.js's own path. bin/start.js is the real entry point —
+// it always calls main() itself — so if this also matched "start.js", an
+// `import('../server.js')` from bin/start.js would see argv[1] still ending
+// in "start.js" and auto-run main() here too, racing bin/start.js's own call
+// for the same port and crashing the second listen() with EADDRINUSE.
+// Exported (rather than kept as a bare regex literal) so the exact bug —
+// this guard also matching bin/start.js's path — has a direct regression
+// test; see test/server.test.js.
+export function isInvokedDirectly(argv1) {
+  return Boolean(argv1) && /(^|[\\/])server\.js$/.test(argv1);
+}
+const invokedDirectly = isInvokedDirectly(process.argv[1]);
 if (invokedDirectly) {
   main().catch((err) => {
     console.error(`\n  vercel-analytics could not start: ${err.message}\n`);

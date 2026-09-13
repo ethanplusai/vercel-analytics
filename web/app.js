@@ -216,7 +216,6 @@ async function load() {
     projectsView = renderProjects(projectsContainer, {
       projects: projectsData.projects,
       range: state.range,
-      overviewTotals: overviewData.totals,
     });
     dimensionsView = renderDimensions(dimensionsContainer, { range: state.range });
 
