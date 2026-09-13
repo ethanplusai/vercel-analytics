@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual, createHash, scryptSync } from 'node:crypto';
 
-const COOKIE_NAME = 'gha_session';
+const COOKIE_NAME = 'va_session';
 // __Host- makes browsers refuse the cookie unless it is Secure, Path=/, and
 // carries no Domain attribute — that stops a sibling subdomain from setting
 // a cookie that shadows ours. It can't be used on plain http, so it's only
@@ -55,7 +55,7 @@ export function createAuth({ passphrase, sessionSecret = null, now = () => Date.
   // because the derivation MUST be deterministic: separate serverless
   // instances have to agree on the key or users get randomly logged out.
   const key = enabled
-    ? (sessionSecret || scryptSync(secretSource, 'gha-session-v1', 32).toString('base64url'))
+    ? (sessionSecret || scryptSync(secretSource, 'va-session-v1', 32).toString('base64url'))
     : null;
 
   const sign = (payload) => createHmac('sha256', key).update(payload).digest('base64url');
@@ -69,7 +69,7 @@ export function createAuth({ passphrase, sessionSecret = null, now = () => Date.
     // refusal for a too-short passphrase) should read this rather than
     // re-implementing the trim themselves — otherwise the "what is the
     // passphrase" logic lives in two places and can drift apart, exactly as
-    // it did when GHA_PASSWORD='abc' plus 20 trailing spaces satisfied a
+    // it did when VA_PASSWORD='abc' plus 20 trailing spaces satisfied a
     // raw-length check while the effective secret was 3 characters.
     effectiveLength: secretSource.length,
 
