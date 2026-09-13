@@ -18,6 +18,10 @@ test('listProjects follows the pagination cursor to exhaustion', async () => {
       projects: [
         { id: 'prj_1', name: 'one', webAnalytics: { enabledAt: 1 } },
         { id: 'prj_2', name: 'two' },
+        // Analytics object PRESENT but never enabled. This row is the reason the
+        // filter tests `enabledAt` rather than the presence of `webAnalytics`:
+        // a check like `'webAnalytics' in p` would wrongly include it.
+        { id: 'prj_never', name: 'never-enabled', webAnalytics: {} },
       ],
       pagination: { next: 12345 },
     },
