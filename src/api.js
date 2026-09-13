@@ -61,14 +61,21 @@ export function createApi({ config, client, cache, now = () => new Date() }) {
       // defensive: de-duplicate by id so a scope that reports a project
       // already seen (a quirky API response, or a token whose personal and
       // team listings overlap) can never double-count it in a combined
-      // total. First occurrence wins, so the personal scope (listed first)
-      // takes precedence over a team's copy of the same project.
+      // total. A team-scoped copy is preferred over the personal one when
+      // both exist: the personal scope carries `teamId: undefined`, so if
+      // the surviving record were the personal copy, `perProject` below
+      // would query Vercel for it with no teamId — the wrong scope for a
+      // project that actually lives under a team. Among same-typed
+      // duplicates (two teams both listing it, say), first occurrence wins.
       const byId = new Map();
       const failures = [];
       results.forEach((r, i) => {
         if (r.ok) {
           for (const p of r.value) {
-            if (!byId.has(p.id)) byId.set(p.id, p);
+            const existing = byId.get(p.id);
+            if (!existing || (existing.teamId == null && p.teamId != null)) {
+              byId.set(p.id, p);
+            }
           }
         } else {
           failures.push({ scope: scopes[i].slug ?? 'personal', message: r.error.message });

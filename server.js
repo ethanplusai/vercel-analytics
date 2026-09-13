@@ -4,7 +4,7 @@ import { createVercelClient } from './src/vercel.js';
 import { createCache } from './src/cache.js';
 import { createAuth } from './src/auth.js';
 import { createApi } from './src/api.js';
-import { sendError } from './src/http.js';
+import { sendError, isRequestLocal } from './src/http.js';
 import { renderLoginPage } from './src/login-page.js';
 
 const MIN_PASSPHRASE = 20;
@@ -65,6 +65,20 @@ export function assertSafeToStart(config, auth) {
     throw new Error('VERCEL_TOKEN is required. Create a token at https://vercel.com/account/tokens');
   }
   if (!config.exposedBeyondLoopback) return;
+  // VA_ALLOWED_HOSTS is documented as optional ("behind a proxy"), but the
+  // host guard below (isRequestLocal, shared with src/api.js) is
+  // unconditional: it accepts only loopback names plus whatever this list
+  // adds. Leaving it empty on a real deployment means /login renders and
+  // the passphrase is even accepted, then EVERY subsequent request 403s as
+  // a forbidden host — a failure that reads as a login bug and is nearly
+  // impossible to diagnose from the browser. Refusing to start names the
+  // actual cause instead.
+  if ((config.allowedHosts ?? []).length === 0) {
+    throw new Error(
+      'VA_ALLOWED_HOSTS must list the hostname(s) this deployment is served on '
+      + '(e.g. "analytics.example.com"), or every request will be refused as a forbidden host.',
+    );
+  }
   if (!auth.enabled && !config.allowPublic) {
     throw new Error(
       'This deployment is reachable beyond loopback with no VA_PASSWORD. '
@@ -89,6 +103,19 @@ export function createGate({
   auth, config, api, sleep = defaultSleep,
 }) {
   return async function gate(req, res) {
+    // Must run before ANY /login or /logout handling, not just before the
+    // authenticated routes below — createApi has its own copy of this same
+    // check (shared via src/http.js, not reimplemented), but that copy is
+    // reached only *after* this gate's login/logout branches return, so
+    // without a check here those two routes would be wide open to a
+    // spoofed Host header: a cross-origin login/logout CSRF, or worse, a
+    // DNS-rebinding page brute-forcing the passphrase off the 303-vs-401
+    // response with nothing but the fixed delay in the way.
+    if (!isRequestLocal(req, { extraHosts: config.allowedHosts ?? [] })) {
+      sendError(res, 403, 'forbidden_host', 'This server only accepts requests from the local machine.');
+      return;
+    }
+
     if (!auth.enabled) {
       await api(req, res);
       return;
@@ -104,7 +131,15 @@ export function createGate({
 
     if (url.pathname === '/login') {
       if (req.method === 'GET') {
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        // Already signed in: re-rendering the form here would invite
+        // resubmission and just bounces the user right back regardless, so
+        // send them on to / instead of showing a login page they don't need.
+        if (auth.isAuthenticated(req, { secure })) {
+          res.writeHead(303, { location: '/', 'cache-control': 'no-store' });
+          res.end();
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
         res.end(renderLoginPage({}));
         return;
       }
@@ -119,11 +154,13 @@ export function createGate({
         }
         const candidate = params.get('password') ?? '';
         if (auth.checkPassphrase(candidate)) {
-          res.writeHead(303, { location: '/', 'set-cookie': auth.issueCookie({ secure }) });
+          res.writeHead(303, {
+            location: '/', 'set-cookie': auth.issueCookie({ secure }), 'cache-control': 'no-store',
+          });
           res.end();
         } else {
           await sleep(FAILED_LOGIN_DELAY_MS);
-          res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
+          res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
           res.end(renderLoginPage({ error: 'Incorrect passphrase.' }));
         }
         return;
@@ -133,7 +170,9 @@ export function createGate({
     }
 
     if (url.pathname === '/logout' && req.method === 'POST') {
-      res.writeHead(303, { location: '/login', 'set-cookie': auth.clearCookie({ secure }) });
+      res.writeHead(303, {
+        location: '/login', 'set-cookie': auth.clearCookie({ secure }), 'cache-control': 'no-store',
+      });
       res.end();
       return;
     }
@@ -145,7 +184,7 @@ export function createGate({
       if (url.pathname.startsWith('/api/')) {
         sendError(res, 401, 'unauthorized', 'Sign in to use this API.');
       } else {
-        res.writeHead(303, { location: '/login' });
+        res.writeHead(303, { location: '/login', 'cache-control': 'no-store' });
         res.end();
       }
       return;
