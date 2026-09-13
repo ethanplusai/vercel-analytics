@@ -225,7 +225,8 @@ function tipRow(swatchColor, value, label) {
 }
 
 // ---------------------------------------------------------------------------
-// renderTimeSeries — the main line/area chart used on the repo detail page.
+// renderTimeSeries — the main line/area chart, used for the combined
+// overview and for each project's own daily series.
 // ---------------------------------------------------------------------------
 
 function buildTimeSeriesTable(days, series) {

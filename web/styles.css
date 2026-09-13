@@ -687,118 +687,11 @@ a { color: inherit; }
 
 .is-loading { opacity: .55; transition: opacity .15s ease; }
 
-/* ---------------------------------------------------------------------
-   14. Repository detail view (Task 10)
-   --------------------------------------------------------------------- */
-
-.detail__head {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.detail__back {
-  align-self: flex-start;
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-decoration: none;
-}
-
-.detail__back:hover {
-  color: var(--text-primary);
-}
-
-.detail__title-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.detail__title-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.detail__title {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detail__owner {
-  color: var(--text-secondary);
-  font-weight: 400;
-}
-
-.detail__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.detail__stop {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.detail__desc {
-  font-size: 13px;
-  max-width: 68ch;
-}
-
-.detail__meta-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.detail__meta {
-  font-size: 13px;
-}
-
-.detail__footnote {
-  font-size: 12px;
-}
-
-.stat__sub {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-}
-
-.chart-stack {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
-  margin: 20px 0;
-}
-
-.panel-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
 @media (max-width: 720px) {
-  .panel-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* ---------------------------------------------------------------------
-   15. Manage-repositories panel (Task 11)
+   15. Skeletons and loading states
 
    Inline and collapsible, not a modal: it renders in normal flow beneath
    the controls row, so no `position: fixed`, no backdrop, no scroll lock.
@@ -834,55 +727,12 @@ a { color: inherit; }
   margin: 10px 0;
 }
 
-.panel__list {
-  max-height: 46vh;
-  overflow: auto;
-  margin: 0 -8px;
-}
-
-.panel__row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 8px;
-  border-radius: var(--radius-sm);
-}
-
-.panel__row:hover {
-  background: var(--surface-2);
-}
-
-.panel__row-info {
-  min-width: 0;
-}
-
-.panel__row-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .panel__desc {
   font-size: 12px;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.panel__row-meta {
-  font-size: 12px;
-}
-
-.panel__row-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.panel__row-error {
-  grid-column: 1 / -1;
 }
 
 .panel__add {
