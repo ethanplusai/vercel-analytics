@@ -14,7 +14,7 @@ REST API live, on every request, and does that adding-up for you.
 There is no database, no polling, no cron job, no build step, and **zero
 npm dependencies**. It is plain Node.js, start to finish.
 
-![The dashboard: a combined pageviews/visitors chart across five projects, one opened project's own sparkline, and a country breakdown table](docs/screenshot.png)
+![The dashboard: a combined pageviews/visitors chart across five projects, each project's own pageviews/visitors and sparkline, and a country breakdown table](docs/screenshot.png)
 
 *(Sample data — a fake token, a fake team, and five fake projects. See
 [How it works](#how-it-works) for what's actually running underneath it.)*
